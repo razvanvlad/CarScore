@@ -263,7 +263,7 @@ app.post('/analyze', async (req: express.Request, res: express.Response) => {
     console.log(`Starting analysis of ${links.length} links...`);
     const analysisPromises = links.map(async (link) => {
       console.log(`Analyzing link: ${link}`);
-      const scrapedData = await scrapeCarListing(link);
+      const scrapedData = await scrapeOlx(link);
 
       // Extract relevant data for AI analysis
       const { description, features = [], kilometers, year, fuel, transmission, ...restOfData } = scrapedData;
@@ -309,8 +309,8 @@ app.post('/analyze', async (req: express.Request, res: express.Response) => {
       };
 
       let score = 100;
-      score -= aiAnalysis.flags.reduce((total, flag) => total + (flagPenalties[flag as keyof typeof flagPenalties] || 5), 0);
-      score -= aiAnalysis.defects.reduce((total, defect) => total + (defectPenalties[defect as keyof typeof defectPenalties] || 3), 0);
+      score -= aiAnalysis.flags.reduce((total: number, flag: string) => total + (flagPenalties[flag as keyof typeof flagPenalties] || 5), 0);
+      score -= aiAnalysis.defects.reduce((total: number, defect: string) => total + (defectPenalties[defect as keyof typeof defectPenalties] || 3), 0);
       score = Math.max(0, score);
 
       // Combine scores

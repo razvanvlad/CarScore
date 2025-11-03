@@ -1,62 +1,210 @@
 # CarScore AI Analyzer
 
-This is a full-stack application using React (with Vite) for the frontend and Node.js (with Express and Puppeteer) for the backend. The backend performs real web scraping to analyze car data.
+A full-stack car listing analyzer that uses AI to evaluate car listings from OLX Romania. The application scrapes car data using Puppeteer, analyzes it with Google's Gemini AI, and provides comprehensive scoring based on defects, red flags, and value assessment.
+
+## Tech Stack
+
+### Frontend
+- React 18 with TypeScript
+- Vite for build tooling
+- Tailwind CSS for styling
+- html2canvas for screenshot functionality
+
+### Backend
+- Node.js with Express
+- TypeScript
+- Puppeteer for web scraping
+- Google Generative AI (Gemini 1.5 Flash)
+- dotenv for environment management
 
 ## Prerequisites
 
 - Node.js (version 18 or higher)
 - npm (usually comes with Node.js)
-- A valid Gemini API Key.
+- A valid Google Gemini API Key
 
-## How to Run Locally
-
-This project now has two parts: a frontend and a backend server. The `npm run dev` command will start both for you.
+## Initial Setup
 
 ### 1. Install Dependencies
 
-There are dependencies for the main project and for the server. Run this command from the **root project folder** to install everything:
+Install dependencies for both frontend and backend:
 
 ```bash
-npm install --save-dev concurrently && npm install --prefix server puppeteer express cors
+# Root directory (frontend dependencies)
+npm install
+
+# Backend dependencies
+cd backend
+npm install
+cd ..
 ```
 
-### 2. Install Scraping Browser
+### 2. Install Puppeteer Browser
 
-The backend uses Puppeteer to control a headless browser for scraping. This is a one-time setup step to download a compatible version of Chrome. Run this from the **root project folder**:
+Puppeteer requires a compatible Chrome browser. This is a one-time setup:
 
 ```bash
 npx puppeteer browsers install chrome
 ```
 
-### 3. Add Your API Key to the Backend
+### 3. Configure Environment Variables
 
-The API key is now used by the backend server.
+Create a `.env` file in the **backend** folder:
 
-- **Create a `.env` file inside the `server` folder.**
-- The variable name **must be `API_KEY`**.
-- Add your key like this:
-
-```
-# Inside server/.env
+```bash
+# backend/.env
 API_KEY=YOUR_GEMINI_API_KEY_HERE
 ```
 
-### 4. Start the Application
+## Running the Application
 
-Run the main dev command from the **root project folder**:
+### Standard Start
 
 ```bash
-npm run dev
+# Terminal 1 - Backend Server
+npm run dev:backend
+
+# Terminal 2 - Frontend Development Server
+npm run dev:frontend
 ```
 
-This will:
-- Start the Vite frontend server (usually on `http://localhost:5173`).
-- Start the Node.js backend server (on `http://localhost:3001`).
-- Open your browser to the frontend app.
+### How to Restart Properly
 
-The application is now running with a real scraping backend!
+If you need to restart the application with clean cache:
+
+```bash
+# Terminal 1 (Backend - keep running)
+npm run dev:backend
+
+# Terminal 2 (Frontend - restart with clean cache)
+npm run dev:frontend -- --force
+```
+
+The application will be available at:
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:3001`
+
+## API Endpoints
+
+### Root Endpoint
+```
+GET /
+```
+Returns API information and available endpoints.
+
+### Analyze Cars
+```
+POST /analyze
+```
+Analyzes car listings from OLX links.
+
+**Request Body:**
+```json
+{
+  "links": [
+    "https://www.olx.ro/oferta/...",
+    "https://www.olx.ro/oferta/..."
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "winner": { /* Best scoring car */ },
+  "table": [ /* All analyzed cars sorted by score */ ],
+  "timestamp": "2025-11-04T..."
+}
+```
+
+### Health Check
+```
+GET /health
+```
+Returns server status and uptime.
+
+## Features
+
+### AI Analysis
+The app uses Gemini AI to identify:
+- **Mechanical Defects**: timing chain, EGR, DPF, clutch, suspension, turbo, injectors
+- **Red Flags**: accident history, odometer rollback, maintenance issues, pricing anomalies
+- **Reliability Score**: 0-100 based on overall condition
+- **Value Assessment**: Whether the car is good value for money
+
+### Scoring System
+Cars are scored based on:
+- Price deviation from predicted value (30% weight)
+- Mechanical defects and their severity (penalty-based)
+- Red flags and their severity (penalty-based)
+- AI reliability assessment (20% weight)
+
+### Data Extracted
+- Title
+- Price
+- Year of manufacture
+- Kilometers/Mileage
+- Engine power
+- Fuel type
+- Full description
+- Features and equipment
+
+## Project Structure
+
+```
+.
+├── backend/
+│   ├── src/
+│   │   └── index.ts          # Backend server & scraping logic
+│   ├── package.json
+│   └── .env                   # API key configuration
+├── src/                       # Frontend React components
+├── package.json               # Root package.json
+├── vite.config.ts            # Vite configuration
+└── README.md
+```
 
 ## Troubleshooting
 
-- **`Cannot connect to the backend` error in the app:** Make sure the backend server started correctly. Check the terminal output for any errors from the `[server]` process.
-- **Dependency errors:** If you have issues, try a clean install: delete `node_modules` and `package-lock.json` from both the root folder and the `server` folder, then run `npm install` again in the root.
+### Backend Connection Issues
+- Ensure the backend server started correctly on port 3001
+- Check the terminal output for any errors
+- Verify the API_KEY is set in `backend/.env`
+
+### Scraping Failures
+- OLX may have changed their HTML structure
+- Check for rate limiting or IP blocking
+- Ensure Puppeteer browser is installed correctly
+
+### Dependency Issues
+Clean install if you encounter problems:
+```bash
+# Remove node_modules and lock files
+rm -rf node_modules package-lock.json
+rm -rf backend/node_modules backend/package-lock.json
+
+# Reinstall
+npm install
+cd backend && npm install
+```
+
+### TypeScript Errors
+Make sure all dependencies are installed and TypeScript version is compatible:
+```bash
+npm install typescript@^5.9.3 --save-dev
+```
+
+## Development Notes
+
+- The backend uses TypeScript with strict type checking
+- Puppeteer runs in headless mode for performance
+- AI responses are cached to reduce API calls
+- Frontend uses Vite's hot module replacement for fast development
+
+## Build for Production
+
+```bash
+npm run build
+```
+
+This will create an optimized production build in the `dist` folder.
