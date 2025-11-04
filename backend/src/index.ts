@@ -514,48 +514,81 @@ async function scrapeOlx(url: string): Promise<any> {
 // --- AI ANALYSIS FUNCTION ---
 async function analyzeCarDescription(description: string, features: string[], kilometers: number, year: number, fuel: string, transmission: string) {
   try {
+    // Calculate expected mileage range for odometer fraud detection
+    const carAge = new Date().getFullYear() - year;
+    const avgKmPerYear = 15000; // Average km/year in Europe
+    const expectedMinKm = carAge * 8000;  // Low usage: 8k km/year
+    const expectedMaxKm = carAge * 20000; // High usage: 20k km/year
+    const expectedAvgKm = carAge * avgKmPerYear;
+
+    // Check for verification keywords in description
+    const hasVerification = /carvertical|istoric\s+verificat|verificat\s+oficial|raport\s+oficial|documente\s+complete/i.test(description);
+
     // Create a comprehensive prompt using all available data
     const prompt = `
-            You are an expert car analyst. Analyze the following Romanian car listing details:
+            You are an expert car analyst specializing in Romanian used car market. Analyze this listing VERY CRITICALLY:
 
             Description: "${description}"
-            
+
             Features/Equipment:
             ${features.map(f => `- ${f}`).join('\n')}
-            
+
             Technical Details:
-            - Kilometers: ${kilometers.toLocaleString()} km
+            - Kilometers: ${kilometers.toLocaleString()} km (Expected range for ${carAge} year old car: ${expectedMinKm.toLocaleString()}-${expectedMaxKm.toLocaleString()} km)
             - Year: ${year}
             - Fuel: ${fuel}
             - Transmission: ${transmission}
-            
-            Your task:
-            1. Identify potential mechanical defects from this list: [timing_chain, egr, dpf, clutch, suspension, turbo, injectors]
-               - Consider: high mileage for age, common problems for this fuel type, specific mentions in description
-               - For Diesel: watch for DPF and EGR issues, especially if low mileage or city driving mentioned
-               - For high mileage cars (>250,000 km): consider timing chain, turbo, and suspension wear
-            
-            2. Identify red flags from this list: [accident, odo_rollback, maintenance_issues, high_price, low_price]
-               - "accident": Only if description mentions "lovit", "accident", "vopsit", "airbag", "deformat"
-               - "odo_rollback": If mileage seems unusually low for the year (e.g., 50,000 km for a 10-year-old car)
-               - "maintenance_issues": If description mentions neglected maintenance, missing service history, or major repairs needed
-               - "high_price": If price seems significantly higher than market average for this spec
-               - "low_price": If price seems suspiciously low (could indicate hidden problems)
-            
-            3. Assess the overall value and reliability
-               - Consider: mileage vs year, maintenance history implications, feature quality, seller reputation
-            
-            Return ONLY a JSON object with this exact structure:
+            - Has verification documents: ${hasVerification ? 'YES' : 'NO'}
+
+            CRITICAL INSTRUCTIONS - READ CAREFULLY:
+
+            1. DEFECTS - Look for these Romanian keywords and patterns:
+
+               **timing_chain** (CRITICAL - 50 point penalty):
+               - "lanț" or "lant" + "distribuție" or "distributie"
+               - "rupt", "uzat", "zgomot", "trebuie schimbat", "probleme la lant"
+               - Any mention of timing chain issues is CRITICAL
+
+               **egr**: "EGR", "recirculare gaze", "înfundat", "curatat"
+               **dpf**: "DPF", "filtru particule", "regenerare", "blocat", "scos"
+               **clutch**: "ambreiaj", "ambreiajul", "patinează", "uzat"
+               **suspension**: "suspensie", "amortizoare", "zgomote", "bielete"
+               **turbo**: "turbo", "turbosuflanta", "pierde putere", "fum albastru"
+               **injectors**: "injectoare", "injecție", "ralanti instabil"
+
+            2. RED FLAGS - Be VERY strict:
+
+               **accident**: "lovit", "accident", "vopsit", "airbag", "deformat", "impact", "avariat"
+
+               **odo_rollback** (VERY IMPORTANT):
+               - If kilometers (${kilometers}) < ${expectedMinKm} AND no verification mentioned → SUSPICIOUS
+               - Average should be ~${expectedAvgKm} km for a ${carAge} year old car
+               - Look for: "kilometraj real", "verificat", but DOUBT if no proof
+
+               **maintenance_issues**:
+               - "service nefăcut", "întreținere neglijată", "fără istoric"
+               - "necesită reparații", "trebuie făcut", "probleme"
+
+               **high_price**: If seller emphasizes "urgent", "preț fix", "fără negociere" but car has issues
+               **low_price**: If price seems too good for specs → likely hidden problems
+
+            3. Assess REALISTIC reliability (0-100):
+               - Broken/damaged parts = MAX 40
+               - Missing verification + low km = MAX 60
+               - High mileage (>250k) = MAX 70
+               - Perfect condition + verified = 90+
+
+            4. Output format:
             {
-                "defects": ["defect1", "defect2"],
-                "flags": ["flag1", "flag2"],
-                "reliabilityScore": 85,
-                "valueAssessment": "Good value for money considering the features and condition",
-                "highlights": ["feature1", "feature2"],
-                "concerns": ["issue1", "issue2"]
+                "defects": ["timing_chain", "egr"],  // Only if CLEARLY mentioned
+                "flags": ["odo_rollback", "accident"],  // Be strict!
+                "reliabilityScore": 45,  // LOW if serious issues
+                "valueAssessment": "AVOID - broken timing chain costs €2000+",
+                "highlights": ["Full options", "Xenon lights"],
+                "concerns": ["Timing chain broken - major repair needed", "Low mileage not verified - possible rollback"]
             }
-            
-            Be realistic and conservative in your assessment. Only include defects and flags that are reasonably supported by the data.
+
+            BE HARSH. Romanian used car market has many frauds. If something seems off, FLAG IT.
         `;
 
     const result = await model.generateContent({
@@ -656,35 +689,70 @@ app.post('/analyze', async (req: express.Request, res: express.Response) => {
 
       const predictedPrice = Math.round(basePrice * ageFactor * mileageFactor * conditionFactor);
 
-      // Enhanced scoring system
+      // Enhanced scoring system with REALISTIC penalties
       const priceRatio = basePrice / predictedPrice;
       const priceScore = 100 - (Math.abs(priceRatio - 1) * 100);
 
+      // Calculate mileage-based odometer suspicion
+      const carAge = new Date().getFullYear() - year;
+      const expectedMinKm = carAge * 8000;
+      const avgKmPerYear = kilometers / carAge;
+      const hasVerification = description.toLowerCase().includes('carvertical') ||
+                             description.toLowerCase().includes('verificat') ||
+                             description.toLowerCase().includes('raport oficial');
+
+      // RED FLAGS - Very severe penalties (these are deal-breakers)
       const flagPenalties = {
-        'accident': 25,
-        'odo_rollback': 30,
-        'maintenance_issues': 20,
-        'high_price': 15,
-        'low_price': 10
+        'accident': 35,              // Major structural damage
+        'odo_rollback': 40,          // Fraud - criminal offense
+        'maintenance_issues': 25,    // Unknown reliability
+        'high_price': 10,            // Just overpriced
+        'low_price': 15              // Usually hiding problems
       };
 
+      // DEFECTS - Realistic repair cost penalties
       const defectPenalties = {
-        'timing_chain': 20,
-        'egr': 15,
-        'dpf': 15,
-        'clutch': 10,
-        'suspension': 8,
-        'turbo': 15,
-        'injectors': 12
+        'timing_chain': 50,   // €2000-3000 repair + potential engine damage = CRITICAL
+        'turbo': 30,          // €800-1500 repair
+        'dpf': 25,            // €500-1000 repair or removal
+        'egr': 20,            // €300-700 repair
+        'injectors': 20,      // €400-800 per injector
+        'clutch': 15,         // €300-600 repair
+        'suspension': 12      // €200-500 repair
       };
 
       let score = 100;
-      score -= aiAnalysis.flags.reduce((total: number, flag: string) => total + (flagPenalties[flag as keyof typeof flagPenalties] || 5), 0);
-      score -= aiAnalysis.defects.reduce((total: number, defect: string) => total + (defectPenalties[defect as keyof typeof defectPenalties] || 3), 0);
+
+      // Apply defect penalties
+      score -= aiAnalysis.defects.reduce((total: number, defect: string) =>
+        total + (defectPenalties[defect as keyof typeof defectPenalties] || 5), 0);
+
+      // Apply flag penalties
+      score -= aiAnalysis.flags.reduce((total: number, flag: string) =>
+        total + (flagPenalties[flag as keyof typeof flagPenalties] || 5), 0);
+
+      // Additional odometer fraud detection penalty (independent of AI)
+      if (kilometers < expectedMinKm && !hasVerification) {
+        console.log(`⚠️ Suspicious mileage: ${kilometers} km for ${carAge} year old car (expected min: ${expectedMinKm} km)`);
+        score -= 30; // Likely odometer fraud
+        if (!aiAnalysis.flags.includes('odo_rollback')) {
+          aiAnalysis.flags.push('odo_rollback');
+        }
+        if (!aiAnalysis.concerns) aiAnalysis.concerns = [];
+        aiAnalysis.concerns.push(`Suspiciously low mileage: ${avgKmPerYear.toFixed(0)} km/year (expected 10k-20k km/year)`);
+      }
+
+      // Very high mileage penalty
+      if (kilometers > 300000) {
+        score -= 20; // Significant wear expected
+      } else if (kilometers > 250000) {
+        score -= 15;
+      }
+
       score = Math.max(0, score);
 
-      // Combine scores
-      const finalScore = Math.round((score * 0.7) + (priceScore * 0.3) + (aiAnalysis.reliabilityScore * 0.2));
+      // Combine scores - emphasize reliability over price
+      const finalScore = Math.round((score * 0.5) + (aiAnalysis.reliabilityScore * 0.35) + (priceScore * 0.15));
 
       return {
         ...restOfData,
